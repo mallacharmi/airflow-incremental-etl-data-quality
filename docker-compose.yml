@@ -1,0 +1,100 @@
+version: "3.9"
+
+services:
+  # ---------------- Airflow Metadata DB ----------------
+  postgres:
+    image: postgres:15
+    container_name: airflow_postgres
+    environment:
+      POSTGRES_USER: ${AIRFLOW_DB_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW_DB_NAME}
+    volumes:
+      - airflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_DB_USER}"]
+      interval: 10s
+      retries: 5
+    restart: always
+
+  # ---------------- Analytics / Warehouse DB ----------------
+  postgres-analytics:
+    image: postgres:15
+    container_name: analytics_postgres
+    environment:
+      POSTGRES_USER: ${ANALYTICS_DB_USER}
+      POSTGRES_PASSWORD: ${ANALYTICS_DB_PASSWORD}
+      POSTGRES_DB: ${ANALYTICS_DB_NAME}
+    volumes:
+      - analytics_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ANALYTICS_DB_USER}"]
+      interval: 10s
+      retries: 5
+    restart: always
+
+  # ---------------- Airflow Webserver ----------------
+  airflow-webserver:
+    build: .
+    container_name: airflow_webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-analytics:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__WEBSERVER__SECRET_KEY: my_super_secret_key_123
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
+      - ./tests:/opt/airflow/tests
+
+    ports:
+      - "8081:8080"
+    command: >
+      bash -c "
+      airflow db migrate &&
+      airflow users create
+        --username admin
+        --password admin
+        --firstname Admin
+        --lastname User
+        --role Admin
+        --email admin@example.com || true &&
+      airflow webserver
+      "
+    restart: always
+
+  # ---------------- Airflow Scheduler ----------------
+  airflow-scheduler:
+    build: .
+    container_name: airflow_scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-analytics:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__WEBSERVER__SECRET_KEY: my_super_secret_key_123
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
+      - ./tests:/opt/airflow/tests
+
+    command: scheduler
+    restart: always
+
+volumes:
+  airflow_pgdata:
+  analytics_pgdata:
